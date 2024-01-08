@@ -1,7 +1,6 @@
 package com.cft.entities;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -37,6 +36,21 @@ public class Fighter {
     @Column(name = "previous_position", nullable = false)
     private @Getter @Setter int prevPosition = -1;
 
+    @Column(name = "location")
+    private @Getter @Setter String location;
+
+    @Column(name = "height")
+    private @Getter @Setter Double heightInBlocks;
+
+    @Column(name = "length")
+    private @Getter @Setter Double lengthInBlocks;
+
+    @Column(name = "team")
+    private @Getter @Setter String team;
+
+    @Column(name = "image_file_name")
+    private @Getter @Setter String imageFileName;
+
     @ManyToMany(cascade = {
             CascadeType.MERGE,
             CascadeType.PERSIST
@@ -47,6 +61,10 @@ public class Fighter {
     @JsonIgnore
     @OrderBy("date")
     private @Getter Set<Fight> fights = new HashSet<>();
+
+    @OneToMany(mappedBy = "fighter", cascade = CascadeType.PERSIST)
+    @JsonIgnore
+    private @Getter Set<CFTEventSnapshotEntry> snapshotEntries = new HashSet<>();
 
     public Fighter(UUID id, String name, int position) {
         this.id = id;

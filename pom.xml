@@ -10,7 +10,7 @@
 	</parent>
 	<groupId>com.cft</groupId>
 	<artifactId>CFTAPP</artifactId>
-	<version>1.6.0</version>
+	<version>1.8.0</version>
 	<name>CFTAPP</name>
 	<description>Backend for CFT Website</description>
 	<properties>
@@ -25,11 +25,10 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-web</artifactId>
 		</dependency>
-
 		<dependency>
-			<groupId>mysql</groupId>
-			<artifactId>mysql-connector-java</artifactId>
-			<scope>runtime</scope>
+			<groupId>org.postgresql</groupId>
+			<artifactId>postgresql</artifactId>
+			<version>42.6.0</version>
 		</dependency>
 		<dependency>
 			<groupId>org.projectlombok</groupId>

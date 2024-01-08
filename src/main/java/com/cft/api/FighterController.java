@@ -1,28 +1,35 @@
 package com.cft.api;
 
-import com.cft.config.WebSocketConfig;
+import com.cft.components.CFTFileManager;
+import com.cft.config.GoogleServiceConfig;
 import com.cft.entities.CFTEvent;
 import com.cft.entities.DeletedFighter;
 import com.cft.entities.Fight;
 import com.cft.entities.Fighter;
 import com.cft.entities.ws.SimpleWSUpdate;
-import com.cft.google.GoogleServiceConsts;
-import com.cft.google.GoogleServices;
 import com.cft.repos.CFTEventRepo;
 import com.cft.repos.DeletedFighterRepo;
 import com.cft.repos.FightRepo;
 import com.cft.repos.FighterRepo;
+import com.cft.utils.ws.WebSocketMessageHelper;
+import com.google.api.services.drive.Drive;
 import com.google.api.services.drive.model.File;
+import com.google.api.services.sheets.v4.Sheets;
 import com.google.api.services.sheets.v4.model.BatchUpdateValuesRequest;
 import com.google.api.services.sheets.v4.model.Spreadsheet;
 import com.google.api.services.sheets.v4.model.ValueRange;
 import lombok.NonNull;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.util.MimeType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.io.*;
 import java.net.URI;
@@ -31,6 +38,8 @@ import java.util.*;
 @RestController
 @CrossOrigin
 public class FighterController {
+
+    public static final long MAX_FIGHTER_IMAGE_FILE_SIZE = 5 * 1024 * 1024;
 
     @Autowired
     private FighterRepo fighterRepo;
@@ -47,9 +56,14 @@ public class FighterController {
     @Autowired
     private SimpMessagingTemplate wsTemplate;
 
-    private void sendFighterUpdate(SimpleWSUpdate.UpdateType updateType, Fighter fighter) {
-        this.wsTemplate.convertAndSend(WebSocketConfig.FIGHTER_ENDPOINT, new SimpleWSUpdate<>(updateType, fighter));
-    }
+    @Autowired
+    private CFTFileManager fileManager;
+
+    @Autowired
+    private Sheets sheetsService;
+
+    @Autowired
+    private Drive driveService;
 
     @GetMapping("/api/fighters")
     public List<Fighter> getFighters() {
@@ -64,7 +78,8 @@ public class FighterController {
     @PostMapping("/api/fighters")
     public Fighter addFighter(@RequestBody Fighter fighter) {
         Fighter newFighter = this.fighterRepo.save(fighter);
-        this.sendFighterUpdate(SimpleWSUpdate.UpdateType.POST, newFighter);
+        WebSocketMessageHelper.sendFighterUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTERS,
+                SimpleWSUpdate.UpdateType.POST, newFighter);
 
         return newFighter;
     }
@@ -83,19 +98,31 @@ public class FighterController {
                         otherFighter.setPosition(fighter.getPosition());
 
                         Fighter savedFighter = this.fighterRepo.save(otherFighter);
-                        this.sendFighterUpdate(SimpleWSUpdate.UpdateType.PUT, savedFighter);
+                        WebSocketMessageHelper.sendFighterUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTERS,
+                                SimpleWSUpdate.UpdateType.PUT, savedFighter);
                     });
 
             fighter.setPosition(updated.getPosition());
         }
 
+        fighter.setLocation(updated.getLocation());
+        fighter.setTeam(updated.getTeam());
+
+        fighter.setHeightInBlocks(updated.getHeightInBlocks());
+        fighter.setLengthInBlocks(updated.getLengthInBlocks());
+
         Fighter savedFighter = this.fighterRepo.save(fighter);
-        this.sendFighterUpdate(SimpleWSUpdate.UpdateType.PUT, savedFighter);
+        WebSocketMessageHelper.sendFighterUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTERS,
+                SimpleWSUpdate.UpdateType.PUT, savedFighter);
 
         return savedFighter;
     }
 
     private void deleteFighter(@NonNull Fighter fighter) {
+
+        if(fighter.getImageFileName() != null && !this.fileManager.deleteFile(fighter.getImageFileName())) {
+            System.err.printf("Unable to delete file \"%s\".%n", fighter.getImageFileName());
+        }
 
         CFTEvent firstEvent, lastEvent;
 
@@ -136,18 +163,23 @@ public class FighterController {
 
             Fight savedFight = this.fightRepo.save(fight);
 
-            this.wsTemplate.convertAndSend(WebSocketConfig.FIGHT_ENDPOINT,
-                    new SimpleWSUpdate<>(SimpleWSUpdate.UpdateType.PUT_INDIRECT, savedFight));
+            WebSocketMessageHelper.sendFightUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTERS,
+                    SimpleWSUpdate.UpdateType.PUT, savedFight);
         });
 
         fighter.getFights().clear();
+
+        fighter.getSnapshotEntries().forEach(entry -> {
+            entry.setFighter(null);
+        });
+
         this.fighterRepo.save(fighter);
 
         toDelete.forEach(fight -> {
             this.fightRepo.delete(fight);
 
-            this.wsTemplate.convertAndSend(WebSocketConfig.FIGHT_ENDPOINT,
-                    new SimpleWSUpdate<>(SimpleWSUpdate.UpdateType.DELETE, fight));
+            WebSocketMessageHelper.sendFightUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTERS,
+                    SimpleWSUpdate.UpdateType.DELETE, fight);
         });
 
         this.fighterRepo.delete(fighter);
@@ -157,10 +189,12 @@ public class FighterController {
                     otherFighter.setPosition(otherFighter.getPosition() - 1);
 
                     Fighter savedFighter = this.fighterRepo.save(otherFighter);
-                    this.sendFighterUpdate(SimpleWSUpdate.UpdateType.PUT, savedFighter);
+                    WebSocketMessageHelper.sendFighterUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTERS,
+                            SimpleWSUpdate.UpdateType.PUT, savedFighter);
                 });
 
-        this.sendFighterUpdate(SimpleWSUpdate.UpdateType.DELETE, fighter);
+        WebSocketMessageHelper.sendFighterUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTERS,
+                SimpleWSUpdate.UpdateType.DELETE, fighter);
     }
 
     @DeleteMapping("/api/fighters")
@@ -190,19 +224,19 @@ public class FighterController {
     public ResponseEntity<?> addSnapshot() throws IOException {
         List<Fighter> fighters = this.fighterRepo.findAll();
 
-        if(GoogleServices.DRIVE_SERVICE == null || GoogleServices.SHEETS_SERVICE == null)
+        if(this.driveService == null || this.sheetsService == null)
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("An error has occurred with Google service initialization");
 
         List<CFTEvent> events = this.eventRepo.findAll(Sort.by(Sort.Direction.ASC, "date"));
         CFTEvent curEvent = events.isEmpty() ? null : events.get(events.size() - 1);
 
-        File newSheetFile = GoogleServices.DRIVE_SERVICE.files().create(new File()
+        File newSheetFile = this.driveService.files().create(new File()
                 .setName("%s Snapshot".formatted(curEvent == null ? "No Event" : curEvent.getName()))
-                .setMimeType(GoogleServiceConsts.GOOGLE_SHEETS_MIME_TYPE)
-                .setParents(Collections.singletonList(GoogleServiceConsts.SNAPSHOT_DRIVE_FOLDER_ID))).execute();
+                .setMimeType(GoogleServiceConfig.GOOGLE_SHEETS_MIME_TYPE)
+                .setParents(Collections.singletonList(GoogleServiceConfig.SNAPSHOT_DRIVE_FOLDER_ID))).execute();
 
-        Spreadsheet newSheet = GoogleServices.SHEETS_SERVICE.spreadsheets().get(newSheetFile.getId()).execute();
+        Spreadsheet newSheet = this.sheetsService.spreadsheets().get(newSheetFile.getId()).execute();
 
         List<ValueRange> ranges = new ArrayList<>();
 
@@ -218,12 +252,91 @@ public class FighterController {
         ))).toList());
 
         BatchUpdateValuesRequest updateRequest = new BatchUpdateValuesRequest()
-                .setValueInputOption(GoogleServiceConsts.GOOGLE_SHEETS_INPUT_OPTION)
+                .setValueInputOption(GoogleServiceConfig.GOOGLE_SHEETS_INPUT_OPTION)
                 .setData(ranges);
 
-        GoogleServices.SHEETS_SERVICE.spreadsheets().values()
+        this.sheetsService.spreadsheets().values()
                 .batchUpdate(newSheet.getSpreadsheetId(), updateRequest).execute();
 
         return ResponseEntity.created(URI.create(newSheet.getSpreadsheetUrl())).build();
+    }
+
+    @GetMapping("/api/fighters/{uuid}/image")
+    public ResponseEntity<?> getFighterImage(@PathVariable UUID uuid) {
+        Optional<Fighter> fighterQuery = this.fighterRepo.findById(uuid);
+
+        if(fighterQuery.isEmpty())
+            return ResponseEntity.notFound().build();
+
+        Fighter fighter = fighterQuery.get();
+
+        if(fighter.getImageFileName() == null)
+            return ResponseEntity.notFound().build();
+
+        try {
+            Optional<FileInputStream> imageInputStreamReq = this.fileManager.getFighterImageFile(fighter);
+
+            if(imageInputStreamReq.isEmpty())
+                return ResponseEntity.notFound().build();
+
+            FileInputStream imageInputStream = imageInputStreamReq.get();
+
+            int extensionLocation = fighter.getImageFileName().lastIndexOf('.');
+            String extension = extensionLocation == -1 || extensionLocation >= fighter.getImageFileName().length() - 1
+                    ? "image" : fighter.getImageFileName().substring(extensionLocation + 1);
+
+            return ResponseEntity.ok().contentType(MediaType.asMediaType(new MimeType("image", extension)))
+                    .body(new InputStreamResource(imageInputStream));
+        }
+        catch(Exception ex) {
+            ex.printStackTrace();
+            return ResponseEntity.internalServerError().body("Unable to read file.");
+        }
+    }
+
+    @PutMapping("/api/fighters/{uuid}/image")
+    public ResponseEntity<?> setFighterImage(@PathVariable UUID uuid, @RequestParam("file") MultipartFile imageFile) {
+        Optional<Fighter> fighterQuery = this.fighterRepo.findById(uuid);
+
+        if(fighterQuery.isEmpty())
+            return ResponseEntity.notFound().build();
+
+        Fighter fighter = fighterQuery.get();
+
+        if(imageFile.getSize() > MAX_FIGHTER_IMAGE_FILE_SIZE)
+            return ResponseEntity.badRequest().body("The uploaded file is too large.");
+
+        if(!this.fileManager.writeFighterImageFile(imageFile, fighter)) {
+            return ResponseEntity.internalServerError().body("Unable to upload file.");
+        }
+
+        WebSocketMessageHelper.sendFighterUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTERS,
+                SimpleWSUpdate.UpdateType.PUT, fighter);
+
+        return ResponseEntity.ok(fighter);
+    }
+
+    @DeleteMapping("/api/fighters/{uuid}/image")
+    public ResponseEntity<?> deleteFighterImage(@PathVariable UUID uuid) {
+        Optional<Fighter> fighterQuery = this.fighterRepo.findById(uuid);
+
+        if(fighterQuery.isEmpty())
+            return ResponseEntity.notFound().build();
+
+        Fighter fighter = fighterQuery.get();
+
+        if(fighter.getImageFileName() == null)
+            return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body("This fighter does not have an image.");
+
+        if(!this.fileManager.deleteFile(fighter.getImageFileName()))
+            return ResponseEntity.internalServerError().body("Unable to delete image.");
+
+        fighter.setImageFileName(null);
+        this.fighterRepo.save(fighter);
+
+        WebSocketMessageHelper.sendFighterUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTERS,
+                SimpleWSUpdate.UpdateType.PUT, fighter);
+
+        return ResponseEntity.noContent().build();
     }
 }

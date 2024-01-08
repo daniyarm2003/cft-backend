@@ -1,12 +1,13 @@
 package com.cft.api;
 
-import com.cft.config.WebSocketConfig;
 import com.cft.entities.CFTEvent;
 import com.cft.entities.Fight;
 import com.cft.entities.Fighter;
 import com.cft.entities.ws.SimpleWSUpdate;
+import com.cft.repos.CFTEventRepo;
 import com.cft.repos.FightRepo;
 import com.cft.repos.FighterRepo;
+import com.cft.utils.ws.WebSocketMessageHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.NonNull;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,11 +41,10 @@ public class FightController {
     private FighterRepo fighterRepo;
 
     @Autowired
-    private SimpMessagingTemplate wsTemplate;
+    private CFTEventRepo eventRepo;
 
-    private void sendFightUpdate(SimpleWSUpdate.UpdateType updateType, Fight fight) {
-        this.wsTemplate.convertAndSend(WebSocketConfig.FIGHT_ENDPOINT, new SimpleWSUpdate<>(updateType, fight));
-    }
+    @Autowired
+    private SimpMessagingTemplate wsTemplate;
 
     @GetMapping("/api/fights")
     public List<Fight> getFights() {
@@ -59,13 +59,14 @@ public class FightController {
     @PostMapping("/api/fights")
     public Fight addFight(@RequestBody Fight fight) {
         Fight newFight = this.fightRepo.save(fight);
-        this.sendFightUpdate(SimpleWSUpdate.UpdateType.POST, newFight);
+        WebSocketMessageHelper.sendFightUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTS,
+                SimpleWSUpdate.UpdateType.POST, newFight);
 
         return newFight;
     }
 
     @PutMapping("/api/fights/{uuid}")
-    public Fight updateFight(@PathVariable UUID uuid, @RequestBody Fight updated) {
+    public ResponseEntity<?> updateFight(@PathVariable UUID uuid, @RequestBody Fight updated) {
         Fight fight = this.fightRepo.findById(uuid).orElseThrow();
 
         fight.setStatus(updated.getStatus());
@@ -73,10 +74,36 @@ public class FightController {
         fight.setDurationInSeconds(updated.getDurationInSeconds());
         fight.setWinner(updated.getWinner());
 
-        Fight savedFight = this.fightRepo.save(fight);
-        this.sendFightUpdate(SimpleWSUpdate.UpdateType.PUT, savedFight);
+        Integer newFightNum = updated.getFightNum();
 
-        return savedFight;
+        if(newFightNum != null && !newFightNum.equals(fight.getFightNum())) {
+            int maxFightNum = fight.getEvent().getNextFightNum() - 1;
+
+            if (newFightNum < 0 || newFightNum > maxFightNum) {
+                return ResponseEntity.badRequest()
+                        .body("ERROR: fight number must be between %d and %d inclusive".formatted(0, maxFightNum));
+            }
+
+            List<Fight> affectedFights = newFightNum < fight.getFightNum() ?
+                    this.fightRepo.findFightNumChangeAffectedFights(fight.getEvent().getId(), newFightNum, fight.getFightNum()) :
+                    this.fightRepo.findFightNumChangeAffectedFights(fight.getEvent().getId(), fight.getFightNum() + 1, newFightNum + 1);
+
+            affectedFights.forEach(affectedFight -> {
+                affectedFight.setFightNum(affectedFight.getFightNum() + (newFightNum < fight.getFightNum() ? 1 : -1));
+                WebSocketMessageHelper.sendFightUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTS,
+                        SimpleWSUpdate.UpdateType.PUT, affectedFight);
+            });
+
+            this.fightRepo.saveAll(affectedFights);
+
+            fight.setFightNum(newFightNum);
+        }
+
+        Fight savedFight = this.fightRepo.save(fight);
+        WebSocketMessageHelper.sendFightUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTS,
+                SimpleWSUpdate.UpdateType.PUT, savedFight);
+
+        return ResponseEntity.ok(savedFight);
     }
 
     private void deleteFight(@NonNull Fight fight) {
@@ -84,12 +111,33 @@ public class FightController {
             fighter.getFights().removeIf(fighterFight -> fighterFight.equals(fight));
 
             Fighter savedFighter = this.fighterRepo.save(fighter);
-            this.wsTemplate.convertAndSend(WebSocketConfig.FIGHTER_ENDPOINT,
-                    new SimpleWSUpdate<>(SimpleWSUpdate.UpdateType.PUT_INDIRECT, savedFighter));
+            WebSocketMessageHelper.sendFighterUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTS,
+                    SimpleWSUpdate.UpdateType.PUT, savedFighter);
         });
 
+        CFTEvent fightEvent = fight.getEvent();
+        List<Fight> lowerFights = this.fightRepo.findFightNumChangeAffectedFights(fightEvent.getId(),
+                fight.getFightNum() + 1, fightEvent.getNextFightNum());
+
+        lowerFights.forEach(lowerFight -> {
+            lowerFight.setFightNum(lowerFight.getFightNum() - 1);
+            WebSocketMessageHelper.sendFightUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTS,
+                    SimpleWSUpdate.UpdateType.PUT, lowerFight);
+        });
+
+        this.fightRepo.saveAll(lowerFights);
+
+        fightEvent.setNextFightNum(fightEvent.getNextFightNum() - 1);
+        fightEvent.getFights().removeIf(eventFight -> eventFight.equals(fight));
+
+        this.eventRepo.save(fightEvent);
+        WebSocketMessageHelper.sendEventUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTS,
+                SimpleWSUpdate.UpdateType.DELETE, fightEvent);
+
         this.fightRepo.delete(fight);
-        this.sendFightUpdate(SimpleWSUpdate.UpdateType.DELETE, fight);
+
+        WebSocketMessageHelper.sendFightUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTS,
+                SimpleWSUpdate.UpdateType.DELETE, fight);
     }
 
     @DeleteMapping("/api/fights/{uuid}")
@@ -114,8 +162,8 @@ public class FightController {
             tmp.addAll(fight.getFighters().stream().filter(fightFighter -> fightFighter.equals(fighter)).toList());
 
             Fighter savedFighter = this.fighterRepo.save(fighter);
-            this.wsTemplate.convertAndSend(WebSocketConfig.FIGHTER_ENDPOINT,
-                    new SimpleWSUpdate<>(SimpleWSUpdate.UpdateType.PUT_INDIRECT, savedFighter));
+            WebSocketMessageHelper.sendFighterUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTS,
+                    SimpleWSUpdate.UpdateType.PUT, savedFighter);
         });
 
         fight.getFighters().removeIf(tmp::contains);
@@ -128,8 +176,8 @@ public class FightController {
             fromRepo.getFights().add(newFight);
 
             Fighter savedFighter = this.fighterRepo.save(fromRepo);
-            this.wsTemplate.convertAndSend(WebSocketConfig.FIGHTER_ENDPOINT,
-                    new SimpleWSUpdate<>(SimpleWSUpdate.UpdateType.PUT_INDIRECT, savedFighter));
+            WebSocketMessageHelper.sendFighterUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTS,
+                    SimpleWSUpdate.UpdateType.PUT, savedFighter);
 
             return savedFighter;
         }).toList();
@@ -137,7 +185,8 @@ public class FightController {
         newFight.getFighters().addAll(newFighters);
 
         Fight savedFight = this.fightRepo.save(newFight);
-        this.sendFightUpdate(SimpleWSUpdate.UpdateType.PUT, savedFight);
+        WebSocketMessageHelper.sendFightUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTS,
+                SimpleWSUpdate.UpdateType.PUT, savedFight);
 
         return savedFight;
     }

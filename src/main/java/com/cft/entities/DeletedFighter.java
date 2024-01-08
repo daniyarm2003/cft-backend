@@ -25,11 +25,11 @@ public class DeletedFighter {
     @Column(name = "fighter_name")
     private @Getter @Setter String fighterName;
 
-    @OneToOne
+    @ManyToOne
     @JoinColumn(name = "debut_event", nullable = false)
     private @Getter @Setter CFTEvent debutEvent;
 
-    @OneToOne
+    @ManyToOne
     @JoinColumn(name = "final_event", nullable = false)
     private @Getter @Setter CFTEvent finalEvent;
 

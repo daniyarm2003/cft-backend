@@ -1,7 +1,11 @@
 package com.cft.entities.ws;
 
-public record SimpleWSUpdate<T>(UpdateType type, T data) {
+public record SimpleWSUpdate<T>(UpdateOrigin origin, UpdateType type, T data) {
     public enum UpdateType {
-        POST, PUT, PUT_INDIRECT, DELETE;
+        POST, PUT, DELETE
+    }
+
+    public enum UpdateOrigin {
+        FIGHTERS, FIGHTS, EVENTS
     }
 }

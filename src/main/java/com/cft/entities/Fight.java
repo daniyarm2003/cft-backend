@@ -39,6 +39,9 @@ public class Fight {
     @Column(name = "duration", nullable = false)
     private @Getter @Setter int durationInSeconds;
 
+    @Column(name = "fight_num")
+    private @Getter @Setter Integer fightNum;
+
     @ManyToMany(mappedBy = "fights")
     private @Getter Set<Fighter> fighters = new HashSet<>();
 

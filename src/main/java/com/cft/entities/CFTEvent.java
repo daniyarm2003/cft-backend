@@ -28,9 +28,22 @@ public class CFTEvent {
     @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-dd HH:mm:ss")
     private @Getter @Setter Date date;
 
+    @Column(name = "next_fight_num")
+    private @Getter @Setter Integer nextFightNum;
+
     @OneToMany(mappedBy = "event", cascade = CascadeType.ALL)
-    @OrderBy("date")
+    @OrderBy("fightNum")
     private @Getter List<Fight> fights = new ArrayList<>();
+
+    @OneToMany(mappedBy = "debutEvent", cascade = CascadeType.REMOVE)
+    private List<DeletedFighter> deletedDebuts = new ArrayList<>();
+
+    @OneToMany(mappedBy = "finalEvent", cascade = CascadeType.REMOVE)
+    private List<DeletedFighter> deletedFinals = new ArrayList<>();
+
+    @OneToOne(cascade = CascadeType.REMOVE, orphanRemoval = true)
+    @JoinColumn
+    private @Getter @Setter CFTEventSnapshot snapshot;
 
     @Override
     public boolean equals(Object o) {
