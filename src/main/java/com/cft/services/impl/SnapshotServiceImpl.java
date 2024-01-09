@@ -45,10 +45,10 @@ public class SnapshotServiceImpl implements ISnapshotService {
     @Autowired
     private CFTEventRepo eventRepo;
 
-    @Autowired
+    @Autowired(required = false)
     private Drive driveService;
 
-    @Autowired
+    @Autowired(required = false)
     private Sheets sheetsService;
 
     @Autowired
