@@ -1,6 +1,6 @@
 package com.cft.api;
 
-import com.cft.components.CFTFileManager;
+import com.cft.components.ICFTFighterImageManager;
 import com.cft.config.GoogleServiceConfig;
 import com.cft.entities.CFTEvent;
 import com.cft.entities.DeletedFighter;
@@ -19,7 +19,6 @@ import com.google.api.services.sheets.v4.model.BatchUpdateValuesRequest;
 import com.google.api.services.sheets.v4.model.Spreadsheet;
 import com.google.api.services.sheets.v4.model.ValueRange;
 import lombok.NonNull;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.InputStreamResource;
 import org.springframework.data.domain.Sort;
@@ -57,7 +56,7 @@ public class FighterController {
     private SimpMessagingTemplate wsTemplate;
 
     @Autowired
-    private CFTFileManager fileManager;
+    private ICFTFighterImageManager fighterImageManager;
 
     @Autowired
     private Sheets sheetsService;
@@ -120,7 +119,7 @@ public class FighterController {
 
     private void deleteFighter(@NonNull Fighter fighter) {
 
-        if(fighter.getImageFileName() != null && !this.fileManager.deleteFile(fighter.getImageFileName())) {
+        if(fighter.getImageFileName() != null && !this.fighterImageManager.deleteFighterImageFile(fighter)) {
             System.err.printf("Unable to delete file \"%s\".%n", fighter.getImageFileName());
         }
 
@@ -274,12 +273,7 @@ public class FighterController {
             return ResponseEntity.notFound().build();
 
         try {
-            Optional<FileInputStream> imageInputStreamReq = this.fileManager.getFighterImageFile(fighter);
-
-            if(imageInputStreamReq.isEmpty())
-                return ResponseEntity.notFound().build();
-
-            FileInputStream imageInputStream = imageInputStreamReq.get();
+            FileInputStream imageInputStream = this.fighterImageManager.getFighterImageFile(fighter);
 
             int extensionLocation = fighter.getImageFileName().lastIndexOf('.');
             String extension = extensionLocation == -1 || extensionLocation >= fighter.getImageFileName().length() - 1
@@ -306,9 +300,17 @@ public class FighterController {
         if(imageFile.getSize() > MAX_FIGHTER_IMAGE_FILE_SIZE)
             return ResponseEntity.badRequest().body("The uploaded file is too large.");
 
-        if(!this.fileManager.writeFighterImageFile(imageFile, fighter)) {
+        java.io.File outputFile;
+        try {
+            outputFile = this.fighterImageManager.writeFighterImageFile(imageFile, fighter);
+        }
+        catch(IOException ex) {
+            ex.printStackTrace();
             return ResponseEntity.internalServerError().body("Unable to upload file.");
         }
+
+        fighter.setImageFileName(outputFile.getName());
+        this.fighterRepo.save(fighter);
 
         WebSocketMessageHelper.sendFighterUpdate(this.wsTemplate, SimpleWSUpdate.UpdateOrigin.FIGHTERS,
                 SimpleWSUpdate.UpdateType.PUT, fighter);
@@ -328,7 +330,7 @@ public class FighterController {
         if(fighter.getImageFileName() == null)
             return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body("This fighter does not have an image.");
 
-        if(!this.fileManager.deleteFile(fighter.getImageFileName()))
+        if(!this.fighterImageManager.deleteFighterImageFile(fighter))
             return ResponseEntity.internalServerError().body("Unable to delete image.");
 
         fighter.setImageFileName(null);
