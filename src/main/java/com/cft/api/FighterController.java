@@ -2,15 +2,9 @@ package com.cft.api;
 
 import com.cft.components.ICFTFighterImageManager;
 import com.cft.config.GoogleServiceConfig;
-import com.cft.entities.CFTEvent;
-import com.cft.entities.DeletedFighter;
-import com.cft.entities.Fight;
-import com.cft.entities.Fighter;
+import com.cft.entities.*;
 import com.cft.entities.ws.SimpleWSUpdate;
-import com.cft.repos.CFTEventRepo;
-import com.cft.repos.DeletedFighterRepo;
-import com.cft.repos.FightRepo;
-import com.cft.repos.FighterRepo;
+import com.cft.repos.*;
 import com.cft.utils.ws.WebSocketMessageHelper;
 import com.google.api.services.drive.Drive;
 import com.google.api.services.drive.model.File;
@@ -48,6 +42,9 @@ public class FighterController {
 
     @Autowired
     private CFTEventRepo eventRepo;
+
+    @Autowired
+    private CFTEventSnapshotEntryRepo snapshotEntryRepo;
 
     @Autowired
     private DeletedFighterRepo deletedFighterRepo;
@@ -219,47 +216,6 @@ public class FighterController {
         return fighters.isEmpty() ? null : fighters.get(0);
     }
 
-    @PostMapping("/api/fighters/snapshots")
-    public ResponseEntity<?> addSnapshot() throws IOException {
-        List<Fighter> fighters = this.fighterRepo.findAll();
-
-        if(this.driveService == null || this.sheetsService == null)
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body("An error has occurred with Google service initialization");
-
-        List<CFTEvent> events = this.eventRepo.findAll(Sort.by(Sort.Direction.ASC, "date"));
-        CFTEvent curEvent = events.isEmpty() ? null : events.get(events.size() - 1);
-
-        File newSheetFile = this.driveService.files().create(new File()
-                .setName("%s Snapshot".formatted(curEvent == null ? "No Event" : curEvent.getName()))
-                .setMimeType(GoogleServiceConfig.GOOGLE_SHEETS_MIME_TYPE)
-                .setParents(Collections.singletonList(GoogleServiceConfig.SNAPSHOT_DRIVE_FOLDER_ID))).execute();
-
-        Spreadsheet newSheet = this.sheetsService.spreadsheets().get(newSheetFile.getId()).execute();
-
-        List<ValueRange> ranges = new ArrayList<>();
-
-        ranges.add(new ValueRange().setRange("A1").setValues(Collections.singletonList(
-                List.of("Position", "Name", "Wins", "Draws", "Losses", "No Contests", "Position Change")
-        )));
-
-        ranges.addAll(fighters.stream().map(fighter -> new ValueRange().setRange("A%d".formatted(2 + fighter.getPosition()))
-                .setValues(Collections.singletonList(
-                List.of(fighter.getPosition() == 0 ? "C" : String.valueOf(fighter.getPosition()), fighter.getName(),
-                        fighter.getStats().wins(), fighter.getStats().draws(), fighter.getStats().losses(),
-                        fighter.getStats().noContests(), fighter.getPositionChangeText())
-        ))).toList());
-
-        BatchUpdateValuesRequest updateRequest = new BatchUpdateValuesRequest()
-                .setValueInputOption(GoogleServiceConfig.GOOGLE_SHEETS_INPUT_OPTION)
-                .setData(ranges);
-
-        this.sheetsService.spreadsheets().values()
-                .batchUpdate(newSheet.getSpreadsheetId(), updateRequest).execute();
-
-        return ResponseEntity.created(URI.create(newSheet.getSpreadsheetUrl())).build();
-    }
-
     @GetMapping("/api/fighters/{uuid}/image")
     public ResponseEntity<?> getFighterImage(@PathVariable UUID uuid) {
         Optional<Fighter> fighterQuery = this.fighterRepo.findById(uuid);
@@ -340,5 +296,21 @@ public class FighterController {
                 SimpleWSUpdate.UpdateType.PUT, fighter);
 
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/api/fighters/{uuid}/snapshots")
+    public ResponseEntity<?> getFighterSnapshotEntries(@PathVariable UUID uuid) {
+        Optional<Fighter> fighterQuery = this.fighterRepo.findById(uuid);
+
+        if(fighterQuery.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Fighter fighter = fighterQuery.get();
+
+        List<CFTEventSnapshotEntry> snapshotEntries =
+                this.snapshotEntryRepo.findByFighterOrderBySnapshot_SnapshotDateAsc(fighter);
+
+        return ResponseEntity.ok(snapshotEntries);
     }
 }
