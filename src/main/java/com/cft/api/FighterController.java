@@ -1,18 +1,13 @@
 package com.cft.api;
 
 import com.cft.components.ICFTFighterImageManager;
-import com.cft.config.GoogleServiceConfig;
 import com.cft.entities.*;
 import com.cft.entities.ws.SimpleWSUpdate;
 import com.cft.repos.*;
 import com.cft.utils.filelike.IFileLike;
 import com.cft.utils.ws.WebSocketMessageHelper;
 import com.google.api.services.drive.Drive;
-import com.google.api.services.drive.model.File;
 import com.google.api.services.sheets.v4.Sheets;
-import com.google.api.services.sheets.v4.model.BatchUpdateValuesRequest;
-import com.google.api.services.sheets.v4.model.Spreadsheet;
-import com.google.api.services.sheets.v4.model.ValueRange;
 import lombok.NonNull;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.InputStreamResource;
@@ -25,15 +20,20 @@ import org.springframework.util.MimeType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.awt.*;
+import java.awt.image.BufferedImage;
 import java.io.*;
-import java.net.URI;
 import java.util.*;
+import java.util.List;
 
 @RestController
 @CrossOrigin
 public class FighterController {
 
     public static final long MAX_FIGHTER_IMAGE_FILE_SIZE = 5 * 1024 * 1024;
+
+    private static final int FIGHTER_POSITION_PROGRESSION_GRAPH_WIDTH = 800;
+    private static final int FIGHTER_POSITION_PROGRESSION_GRAPH_HEIGHT = 600;
 
     @Autowired
     private FighterRepo fighterRepo;
@@ -314,5 +314,30 @@ public class FighterController {
                 this.snapshotEntryRepo.findByFighterOrderBySnapshot_SnapshotDateAsc(fighter);
 
         return ResponseEntity.ok(snapshotEntries);
+    }
+
+    @GetMapping("/api/fighters/{uuid}/position_progression_graph")
+    public ResponseEntity<?> getFighterPositionProgressionGraph(@PathVariable UUID uuid) {
+        Optional<Fighter> fighterQuery = this.fighterRepo.findById(uuid);
+
+        if(fighterQuery.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Fighter fighter = fighterQuery.get();
+
+        List<CFTEventSnapshotEntry> snapshotEntries =
+                this.snapshotEntryRepo.findByFighterOrderBySnapshot_SnapshotDateAsc(fighter);
+
+        BufferedImage graphImage = new BufferedImage(FIGHTER_POSITION_PROGRESSION_GRAPH_WIDTH,
+                FIGHTER_POSITION_PROGRESSION_GRAPH_HEIGHT, BufferedImage.TYPE_4BYTE_ABGR);
+
+        Graphics2D graphGraphics = graphImage.createGraphics();
+
+        graphGraphics.setColor(new Color(0x00, 0x80, 0xFF));
+        graphGraphics.drawRect(100, 200, 300, 250);
+
+        return ResponseEntity.ok().contentType(MediaType.asMediaType(new MimeType("image", "png")))
+                .body("TODO");
     }
 }
