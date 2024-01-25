@@ -5,6 +5,7 @@ import com.cft.config.GoogleServiceConfig;
 import com.cft.entities.*;
 import com.cft.entities.ws.SimpleWSUpdate;
 import com.cft.repos.*;
+import com.cft.utils.filelike.IFileLike;
 import com.cft.utils.ws.WebSocketMessageHelper;
 import com.google.api.services.drive.Drive;
 import com.google.api.services.drive.model.File;
@@ -229,7 +230,7 @@ public class FighterController {
             return ResponseEntity.notFound().build();
 
         try {
-            FileInputStream imageInputStream = this.fighterImageManager.getFighterImageFile(fighter);
+            InputStream imageInputStream = this.fighterImageManager.getFighterImageFile(fighter);
 
             int extensionLocation = fighter.getImageFileName().lastIndexOf('.');
             String extension = extensionLocation == -1 || extensionLocation >= fighter.getImageFileName().length() - 1
@@ -256,7 +257,8 @@ public class FighterController {
         if(imageFile.getSize() > MAX_FIGHTER_IMAGE_FILE_SIZE)
             return ResponseEntity.badRequest().body("The uploaded file is too large.");
 
-        java.io.File outputFile;
+        IFileLike outputFile;
+
         try {
             outputFile = this.fighterImageManager.writeFighterImageFile(imageFile, fighter);
         }

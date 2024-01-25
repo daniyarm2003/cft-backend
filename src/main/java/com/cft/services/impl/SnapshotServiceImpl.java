@@ -127,22 +127,7 @@ public class SnapshotServiceImpl implements ISnapshotService {
                 .setValues(Collections.singletonList(columnHeaders)));
 
         for(CFTEventSnapshotEntry entry : entries) {
-            String positionStr = entry.getPosition() != 0 ? String.valueOf(entry.getPosition()) : "C";
-            String positionChangeStr;
-
-            if(entry.isNewFighter()) {
-                positionChangeStr = "NEW";
-            }
-            else if(entry.getPositionChange() == 0) {
-                positionChangeStr = "-";
-            }
-            else {
-                positionChangeStr = entry.getPositionChange() < 0 ?
-                        String.valueOf(entry.getPositionChange()) : "+%d".formatted(entry.getPositionChange());
-            }
-
-            List<Object> snapshotRow = List.of(positionStr, entry.getFighterName(), entry.getWins(), entry.getDraws(),
-                    entry.getLosses(), entry.getNoContests(), positionChangeStr);
+            List<Object> snapshotRow = getSnapshotRow(entry);
 
             valueRanges.add(new ValueRange().setRange("A%d".formatted(entry.getPosition() + 2))
                     .setValues(Collections.singletonList(snapshotRow)));
@@ -157,5 +142,24 @@ public class SnapshotServiceImpl implements ISnapshotService {
         snapshot = this.snapshotRepo.save(snapshot);
 
         return snapshot;
+    }
+
+    private static List<Object> getSnapshotRow(CFTEventSnapshotEntry entry) {
+        String positionStr = entry.getPosition() != 0 ? String.valueOf(entry.getPosition()) : "C";
+        String positionChangeStr;
+
+        if(entry.isNewFighter()) {
+            positionChangeStr = "NEW";
+        }
+        else if(entry.getPositionChange() == 0) {
+            positionChangeStr = "-";
+        }
+        else {
+            positionChangeStr = entry.getPositionChange() < 0 ?
+                    String.valueOf(entry.getPositionChange()) : "+%d".formatted(entry.getPositionChange());
+        }
+
+        return List.of(positionStr, entry.getFighterName(), entry.getWins(), entry.getDraws(),
+                entry.getLosses(), entry.getNoContests(), positionChangeStr);
     }
 }

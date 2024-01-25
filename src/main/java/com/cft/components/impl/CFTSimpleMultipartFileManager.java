@@ -1,6 +1,8 @@
 package com.cft.components.impl;
 
 import com.cft.components.ICFTMultipartFileManager;
+import com.cft.utils.filelike.FilesystemFileLikeAdapter;
+import com.cft.utils.filelike.IFileLike;
 import org.springframework.context.annotation.PropertySource;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
@@ -35,7 +37,7 @@ public class CFTSimpleMultipartFileManager implements ICFTMultipartFileManager {
     }
 
     @Override
-    public FileInputStream getFileInputStream(String name) throws IOException {
+    public InputStream getFileInputStream(String name) throws IOException {
         File inputFile = new File(this.directory, name);
 
         if(!inputFile.exists()) {
@@ -46,7 +48,7 @@ public class CFTSimpleMultipartFileManager implements ICFTMultipartFileManager {
     }
 
     @Override
-    public File saveMultipartFile(MultipartFile inputFile, String name) throws IOException {
+    public IFileLike saveMultipartFile(MultipartFile inputFile, String name) throws IOException {
         File outputFile = new File(this.directory, name);
 
         try(FileOutputStream fileOutputStream = new FileOutputStream(outputFile);
@@ -55,7 +57,7 @@ public class CFTSimpleMultipartFileManager implements ICFTMultipartFileManager {
             multipartFileInputStream.transferTo(fileOutputStream);
         }
 
-        return outputFile;
+        return new FilesystemFileLikeAdapter(outputFile);
     }
 
     @Override
