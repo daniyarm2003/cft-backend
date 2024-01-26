@@ -10,7 +10,7 @@
 	</parent>
 	<groupId>com.cft</groupId>
 	<artifactId>CFTAPP</artifactId>
-	<version>1.8.0</version>
+	<version>1.9.0</version>
 	<name>CFTAPP</name>
 	<description>Backend for CFT Website</description>
 	<properties>

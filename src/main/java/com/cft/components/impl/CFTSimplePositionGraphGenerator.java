@@ -43,9 +43,6 @@ public class CFTSimplePositionGraphGenerator implements ICFTPositionGraphGenerat
     private CFTEventSnapshotEntryRepo snapshotEntryRepo;
 
     private void drawLineGraph(@NonNull Graphics2D imageGraphics, List<CFTEventSnapshotEntry> snapshotEntries, int maxPosition) {
-
-        // This entity has to exist if this function is being called
-
         imageGraphics.setColor(GRAPH_LINE_COLOR);
         imageGraphics.setStroke(GRAPH_LINE_STROKE);
 
@@ -53,14 +50,19 @@ public class CFTSimplePositionGraphGenerator implements ICFTPositionGraphGenerat
         int graphDrawableHeight = GRAPH_HEIGHT - 2 * GRAPH_VERTICAL_PADDING;
 
         for(int i = 0; i < snapshotEntries.size() - 1; i++) {
-            float graphLineRelLeftX = (float)graphDrawableWidth * (float)i / (float)(snapshotEntries.size() - 1);
-            float graphLineRelRightX = (float)graphDrawableWidth * (float)(i + 1) / (float)(snapshotEntries.size() - 1);
+            float graphLineLeftX = GRAPH_HORIZONTAL_PADDING +
+                    (float)graphDrawableWidth * (float)i / (float)(snapshotEntries.size() - 1);
 
-            float graphLineRelLeftY = (float)graphDrawableHeight * (float)snapshotEntries.get(i).getPosition() / (float)maxPosition;
-            float graphLineRelRightY = (float)graphDrawableHeight * (float)snapshotEntries.get(i + 1).getPosition() / (float)maxPosition;
+            float graphLineRightX = GRAPH_HORIZONTAL_PADDING +
+                    (float)graphDrawableWidth * (float)(i + 1) / (float)(snapshotEntries.size() - 1);
 
-            imageGraphics.drawLine(GRAPH_HORIZONTAL_PADDING + (int)graphLineRelLeftX, GRAPH_VERTICAL_PADDING + (int)graphLineRelLeftY,
-                    GRAPH_HORIZONTAL_PADDING + (int)graphLineRelRightX, GRAPH_VERTICAL_PADDING + (int)graphLineRelRightY);
+            float graphLineLeftY = GRAPH_VERTICAL_PADDING +
+                    (float)graphDrawableHeight * (float)snapshotEntries.get(i).getPosition() / (float)maxPosition;
+
+            float graphLineRightY = GRAPH_VERTICAL_PADDING +
+                    (float)graphDrawableHeight * (float)snapshotEntries.get(i + 1).getPosition() / (float)maxPosition;
+
+            imageGraphics.drawLine((int)graphLineLeftX, (int)graphLineLeftY, (int)graphLineRightX, (int)graphLineRightY);
         }
     }
 
@@ -104,6 +106,9 @@ public class CFTSimplePositionGraphGenerator implements ICFTPositionGraphGenerat
     }
 
     private void drawVerticalTickMarks(@NonNull Graphics2D imageGraphics, int maxPosition) {
+        imageGraphics.setColor(GRAPH_BORDER_COLOR);
+        imageGraphics.setStroke(GRAPH_TICK_MARK_STROKE);
+
         int positionIncreaseRate = maxPosition / MAX_NUM_VERTICAL_TICK_MARKS;
 
         // If more than the max number of ticks can be drawn, increment the fighter position increase rate
@@ -134,13 +139,17 @@ public class CFTSimplePositionGraphGenerator implements ICFTPositionGraphGenerat
     }
 
     private void drawGraph(@NonNull Graphics2D imageGraphics, List<CFTEventSnapshotEntry> snapshotEntries) {
-        // Add one to make bottom position visible on graph (rather than covered by border)
-        int maxPosition = this.snapshotEntryRepo.findFirstByOrderByPositionDesc().getPosition() + 1;
+        if(snapshotEntries.size() >= 2) {
+            // Add one to make bottom position visible on graph (rather than covered by border)
+            int maxPosition = this.snapshotEntryRepo.findFirstByOrderByPositionDesc().getPosition() + 1;
 
-        this.drawLineGraph(imageGraphics, snapshotEntries, maxPosition);
+            this.drawHorizontalAxis(imageGraphics, snapshotEntries);
+            this.drawVerticalTickMarks(imageGraphics, maxPosition);
+
+            this.drawLineGraph(imageGraphics, snapshotEntries, maxPosition);
+        }
+
         this.drawGraphBorder(imageGraphics);
-        this.drawHorizontalAxis(imageGraphics, snapshotEntries);
-        this.drawVerticalTickMarks(imageGraphics, maxPosition);
     }
 
     @Override
@@ -151,9 +160,7 @@ public class CFTSimplePositionGraphGenerator implements ICFTPositionGraphGenerat
 
         Graphics2D imageGraphics = image.createGraphics();
 
-        if(snapshotEntries.size() >= 2) {
-            this.drawGraph(imageGraphics, snapshotEntries);
-        }
+        this.drawGraph(imageGraphics, snapshotEntries);
 
         ByteArrayInputStream graphImageInStream;
 
