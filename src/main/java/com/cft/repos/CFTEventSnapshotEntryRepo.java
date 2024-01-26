@@ -10,4 +10,6 @@ import java.util.UUID;
 public interface CFTEventSnapshotEntryRepo extends JpaRepository<CFTEventSnapshotEntry, UUID> {
 
     List<CFTEventSnapshotEntry> findByFighterOrderBySnapshot_SnapshotDateAsc(Fighter fighter);
+
+    CFTEventSnapshotEntry findFirstByOrderByPositionDesc();
 }

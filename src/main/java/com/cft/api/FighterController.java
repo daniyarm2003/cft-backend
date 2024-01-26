@@ -1,6 +1,7 @@
 package com.cft.api;
 
 import com.cft.components.ICFTFighterImageManager;
+import com.cft.components.ICFTPositionGraphGenerator;
 import com.cft.entities.*;
 import com.cft.entities.ws.SimpleWSUpdate;
 import com.cft.repos.*;
@@ -11,6 +12,7 @@ import com.google.api.services.sheets.v4.Sheets;
 import lombok.NonNull;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -20,6 +22,7 @@ import org.springframework.util.MimeType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.*;
@@ -55,6 +58,9 @@ public class FighterController {
 
     @Autowired
     private ICFTFighterImageManager fighterImageManager;
+
+    @Autowired
+    private ICFTPositionGraphGenerator positionGraphGenerator;
 
     @Autowired
     private Sheets sheetsService;
@@ -316,7 +322,7 @@ public class FighterController {
         return ResponseEntity.ok(snapshotEntries);
     }
 
-    @GetMapping("/api/fighters/{uuid}/position_progression_graph")
+    @GetMapping("/api/fighters/{uuid}/position_graph")
     public ResponseEntity<?> getFighterPositionProgressionGraph(@PathVariable UUID uuid) {
         Optional<Fighter> fighterQuery = this.fighterRepo.findById(uuid);
 
@@ -326,18 +332,15 @@ public class FighterController {
 
         Fighter fighter = fighterQuery.get();
 
-        List<CFTEventSnapshotEntry> snapshotEntries =
-                this.snapshotEntryRepo.findByFighterOrderBySnapshot_SnapshotDateAsc(fighter);
+        try {
+            Resource graphResource = this.positionGraphGenerator.generatePositionGraphResource(fighter);
 
-        BufferedImage graphImage = new BufferedImage(FIGHTER_POSITION_PROGRESSION_GRAPH_WIDTH,
-                FIGHTER_POSITION_PROGRESSION_GRAPH_HEIGHT, BufferedImage.TYPE_4BYTE_ABGR);
-
-        Graphics2D graphGraphics = graphImage.createGraphics();
-
-        graphGraphics.setColor(new Color(0x00, 0x80, 0xFF));
-        graphGraphics.drawRect(100, 200, 300, 250);
-
-        return ResponseEntity.ok().contentType(MediaType.asMediaType(new MimeType("image", "png")))
-                .body("TODO");
+            return ResponseEntity.ok()
+                    .contentType(MediaType.asMediaType(new MimeType("image", this.positionGraphGenerator.getImageType())))
+                    .body(graphResource);
+        }
+        catch(IOException ex) {
+            return ResponseEntity.internalServerError().body("Unable to create image");
+        }
     }
 }
